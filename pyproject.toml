@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "duckling"
-version = "1.0.0"
+version = "0.0.1"
 description = "A Beanie-inspired ORM for DuckDB — async-first, Pydantic-powered."
 readme = "README.md"
-license = {text = "Apache LicenseT"}
+license = {text = "Apache License"}
 requires-python = ">=3.10"
 authors = [
     {name = "Duckling Contributors"},
@@ -43,6 +43,9 @@ version_toml = ["pyproject.toml:project.version"]
 branch = "master"
 build_command = "pip install build && python -m build"
 commit_message = "chore(release): {version}"
+tag_format = "v{version}"
+major_on_zero = false
+allow_zero_version = true
 
 [tool.semantic_release.changelog]
 changelog_file = "CHANGELOG.md"
