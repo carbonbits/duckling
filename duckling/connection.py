@@ -68,6 +68,13 @@ class DucklingSession:
         except Exception as e:
             raise ConnectionError(f"Failed to connect to DuckDB: {e}") from e
 
+    def use_connection(self, connection: duckdb.DuckDBPyConnection) -> None:
+        """Use an existing DuckDB connection."""
+        self._connection = connection
+        self._database = None
+        self._config = {}
+        self._initialized = True
+
     @property
     def connection(self) -> duckdb.DuckDBPyConnection:
         """Get the active DuckDB connection."""

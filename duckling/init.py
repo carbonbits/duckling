@@ -25,6 +25,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Optional, Sequence, Type
 
+import duckdb
+
 from .connection import DucklingSession, get_session
 from .document import Document
 
@@ -35,6 +37,7 @@ async def init_duckling(
     read_only: bool = False,
     config: Optional[dict[str, Any]] = None,
     recreate_tables: bool = False,
+    connection: Optional[duckdb.DuckDBPyConnection] = None,
 ) -> DucklingSession:
     """
     Initialize the Duckling ORM — async version.
@@ -43,10 +46,13 @@ async def init_duckling(
 
     Args:
         database: Path to the DuckDB database file, or ":memory:" for in-memory.
+            Ignored if `connection` is provided.
         document_models: List of Document subclasses to register.
-        read_only: Open database in read-only mode.
-        config: Optional DuckDB configuration dict.
+        read_only: Open database in read-only mode. Ignored if `connection` is provided.
+        config: Optional DuckDB configuration dict. Ignored if `connection` is provided.
         recreate_tables: If True, drop and recreate all tables.
+        connection: An existing DuckDB connection to use. If provided, no new
+            connection will be created.
 
     Returns:
         The DucklingSession instance.
@@ -56,16 +62,25 @@ async def init_duckling(
             database="app.db",
             document_models=[User, Product, Order],
         )
+
+        # Or with an existing connection:
+        conn = duckdb.connect("app.db")
+        await init_duckling(
+            connection=conn,
+            document_models=[User, Product, Order],
+        )
     """
     session = get_session()
 
-    # Connect
-    await asyncio.to_thread(
-        session.connect,
-        database=database,
-        read_only=read_only,
-        config=config,
-    )
+    if connection is not None:
+        session.use_connection(connection)
+    else:
+        await asyncio.to_thread(
+            session.connect,
+            database=database,
+            read_only=read_only,
+            config=config,
+        )
 
     # Register and create tables for each document model
     if document_models:
@@ -85,19 +100,36 @@ def init_duckling_sync(
     read_only: bool = False,
     config: Optional[dict[str, Any]] = None,
     recreate_tables: bool = False,
+    connection: Optional[duckdb.DuckDBPyConnection] = None,
 ) -> DucklingSession:
     """
     Initialize the Duckling ORM — synchronous version.
 
     Same as init_duckling() but runs synchronously.
+
+    Args:
+        database: Path to the DuckDB database file, or ":memory:" for in-memory.
+            Ignored if `connection` is provided.
+        document_models: List of Document subclasses to register.
+        read_only: Open database in read-only mode. Ignored if `connection` is provided.
+        config: Optional DuckDB configuration dict. Ignored if `connection` is provided.
+        recreate_tables: If True, drop and recreate all tables.
+        connection: An existing DuckDB connection to use. If provided, no new
+            connection will be created.
+
+    Returns:
+        The DucklingSession instance.
     """
     session = get_session()
 
-    session.connect(
-        database=database,
-        read_only=read_only,
-        config=config,
-    )
+    if connection is not None:
+        session.use_connection(connection)
+    else:
+        session.connect(
+            database=database,
+            read_only=read_only,
+            config=config,
+        )
 
     if document_models:
         for model in document_models:

@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "duckling"
-version = "1.0.0"
+version = "0.1.0"
 description = "A Beanie-inspired ORM for DuckDB — async-first, Pydantic-powered."
 readme = "README.md"
-license = {text = "MIT"}
+license = {text = "Apache LicenseT"}
 requires-python = ">=3.10"
 authors = [
     {name = "Duckling Contributors"},
