@@ -70,6 +70,11 @@ tag_format = "v{version}"
 major_on_zero = false
 allow_zero_version = true
 
+# Treat `refactor:` commits as patch releases (defaults bump only on fix/perf).
+[tool.semantic_release.commit_parser_options]
+minor_tags = ["feat"]
+patch_tags = ["fix", "perf", "refactor"]
+
 [tool.semantic_release.changelog]
 changelog_file = "CHANGELOG.md"
 
