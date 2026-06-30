@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "duckling-orm"
-version = "0.0.1"
+version = "0.0.2"
 description = "A Beanie-inspired ORM for DuckDB — async-first, Pydantic-powered."
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -41,6 +41,7 @@ dev = [
     "pre-commit>=3.5",
     "ruff>=0.6",
 ]
+
 
 [tool.setuptools.packages.find]
 where = ["src"]
