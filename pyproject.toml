@@ -3,11 +3,11 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "duckling"
+name = "duckling-orm"
 version = "0.0.1"
 description = "A Beanie-inspired ORM for DuckDB — async-first, Pydantic-powered."
 readme = "README.md"
-license = {text = "Apache License"}
+license = {text = "Apache-2.0"}
 requires-python = ">=3.10"
 authors = [
     {name = "Duckling Contributors"},
@@ -16,7 +16,7 @@ keywords = ["duckdb", "orm", "pydantic", "async", "beanie"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -29,14 +29,32 @@ dependencies = [
     "pydantic>=2.0.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/carbonbits/duckling"
+Repository = "https://github.com/carbonbits/duckling"
+Issues = "https://github.com/carbonbits/duckling/issues"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
+    "pre-commit>=3.5",
+    "ruff>=0.6",
 ]
 
 [tool.setuptools.packages.find]
 include = ["duckling*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "W"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B"]
 
 [tool.semantic_release]
 version_toml = ["pyproject.toml:project.version"]
