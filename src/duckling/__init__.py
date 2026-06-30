@@ -43,10 +43,7 @@ from .fields import (
 from .init import init_duckling, init_duckling_sync
 from .operators import (
     And,
-    Avg,
     Between,
-    Count,
-    CountDistinct,
     Eq,
     Gt,
     Gte,
@@ -57,16 +54,21 @@ from .operators import (
     Like,
     Lt,
     Lte,
-    Max,
-    Min,
     Ne,
     Not,
     NotIn,
     Or,
     Raw,
+)
+from .query import (
+    Avg,
+    Count,
+    CountDistinct,
+    FindQuery,
+    Max,
+    Min,
     Sum,
 )
-from .query import FindQuery
 
 __all__ = [
     # Core

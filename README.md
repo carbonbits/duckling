@@ -300,7 +300,7 @@ rows = session.fetchall("SELECT count(*) FROM users")
 ## Project Structure
 
 ```
-duckling/
+src/duckling/
 ├── __init__.py         # Public exports
 ├── connection.py       # DuckDB session management
 ├── document.py         # Document base class (the core)
@@ -309,6 +309,8 @@ duckling/
 ├── operators.py        # And, Or, In, Between, Like, etc.
 ├── query.py            # FindQuery builder + aggregation
 └── exceptions.py       # Custom exceptions
+
+tests/                  # Per-module tests (test_document.py, test_query.py, …)
 ```
 
 ## License
