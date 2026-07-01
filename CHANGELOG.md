@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.0.3 (2026-07-01)
+
+### Bug Fixes
+
+- Remove redundant build step that broke release publishing
+  ([`131e756`](https://github.com/carbonbits/duckling/commit/131e756765c051a52394b9850b6164f86afe64cf))
+
+
 ## v0.0.2 (2026-06-30)
 
 ### Bug Fixes
