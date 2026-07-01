@@ -37,12 +37,10 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build distribution
-        if: steps.release.outputs.released == 'true'
-        run: |
-          python -m pip install --upgrade pip build
-          python -m build
-
+      # No separate build step: semantic-release's `build_command` already
+      # builds the sdist + wheel into dist/ during the release step above.
+      # Running `python -m build` a second time collided with the leftover
+      # src/*.egg-info from the first build ("Cannot update time stamp").
       - name: Upload artifacts
         if: steps.release.outputs.released == 'true'
         uses: actions/upload-artifact@v4
