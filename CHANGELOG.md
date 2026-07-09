@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.0.4 (2026-07-09)
+
+### Bug Fixes
+
+- Add basic support for non int primary keys
+  ([`e09e6bf`](https://github.com/carbonbits/duckling/commit/e09e6bfab756112b97cf9df1aba7107ecfafacab))
+
+
 ## v0.0.3 (2026-07-01)
 
 ### Bug Fixes
