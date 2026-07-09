@@ -46,10 +46,11 @@ from typing import (
     get_type_hints,
 )
 
+import duckdb
 from pydantic import BaseModel, ConfigDict
 
 from .connection import DucklingSession, get_session
-from .exceptions import DocumentNotFound, InvalidQueryError
+from .exceptions import DocumentAlreadyExists, DocumentNotFound, InvalidQueryError
 from .fields import Expression, FieldProxy, IndexSpec, SortDirection
 from .query import FindQuery
 
@@ -287,6 +288,35 @@ class Document(BaseModel, metaclass=DocumentMeta):
                         indexed.append((name, arg))
         return indexed
 
+    # ── Primary key strategy ──────────────────
+
+    @classmethod
+    def _is_auto_increment_id(cls) -> bool:
+        """
+        True if the `id` field resolves to `int` (the default primary key
+        strategy: an auto-incrementing INTEGER backed by a DuckDB SEQUENCE).
+
+        Any other resolved type (str, uuid.UUID, ...) is treated as a
+        caller/default_factory-supplied primary key with no sequence.
+        """
+        import typing
+
+        hints = get_type_hints(cls, include_extras=True)
+        py_type = hints.get("id", int)
+
+        origin = get_origin(py_type)
+        if origin is getattr(typing, "Annotated", None):
+            py_type = get_args(py_type)[0]
+            origin = get_origin(py_type)
+
+        args = get_args(py_type)
+        if args:
+            non_none = [a for a in args if a is not type(None)]
+            if non_none:
+                py_type = non_none[0]
+
+        return py_type is int
+
     # ── Table creation ────────────────────────
 
     @classmethod
@@ -296,24 +326,28 @@ class Document(BaseModel, metaclass=DocumentMeta):
         col_types = cls._get_column_types()
         indexed = dict(cls._get_indexed_fields())
 
+        if cls._is_auto_increment_id():
+            id_def = f'"id" INTEGER PRIMARY KEY DEFAULT(nextval(\'seq_{table}_id\'))'
+        else:
+            id_def = f'"id" {col_types["id"]} PRIMARY KEY'
+
         columns = []
         for col_name, col_type in col_types.items():
-            parts = [f'"{col_name}"', col_type]
             if col_name == "id":
-                parts = ['"id"', "INTEGER PRIMARY KEY DEFAULT(nextval('seq_" + table + "_id'))"]
-                continue  # handled separately
+                continue
+            parts = [f'"{col_name}"', col_type]
             if col_name in indexed and indexed[col_name].unique:
                 parts.append("UNIQUE")
             columns.append(" ".join(parts))
 
-        # id column first
-        col_defs = [f'"id" INTEGER PRIMARY KEY DEFAULT(nextval(\'seq_{table}_id\'))']
-        col_defs.extend(columns)
+        col_defs = [id_def] + columns
 
         return f'CREATE TABLE IF NOT EXISTS "{table}" (\n  ' + ",\n  ".join(col_defs) + "\n)"
 
     @classmethod
-    def _build_sequence_sql(cls) -> str:
+    def _build_sequence_sql(cls) -> Optional[str]:
+        if not cls._is_auto_increment_id():
+            return None
         table = cls._get_table_name()
         return f"CREATE SEQUENCE IF NOT EXISTS seq_{table}_id START 1"
 
@@ -321,7 +355,9 @@ class Document(BaseModel, metaclass=DocumentMeta):
     def _create_table_sync(cls) -> None:
         """Create the table synchronously."""
         session = get_session()
-        session.execute(cls._build_sequence_sql())
+        seq_sql = cls._build_sequence_sql()
+        if seq_sql:
+            session.execute(seq_sql)
         session.execute(cls._build_create_table_sql())
 
         # Create indexes
@@ -370,8 +406,10 @@ class Document(BaseModel, metaclass=DocumentMeta):
         table = self._get_table_name()
         data = self._to_row_dict()
 
-        # Remove id if None (auto-generated)
-        if data.get("id") is None:
+        # Remove id if None so the auto-increment sequence default applies.
+        # A non-auto-increment (str/UUID) id left None is kept so the
+        # missing-primary-key error surfaces from the database.
+        if self._is_auto_increment_id() and data.get("id") is None:
             data.pop("id", None)
 
         columns = list(data.keys())
@@ -381,7 +419,12 @@ class Document(BaseModel, metaclass=DocumentMeta):
 
         sql = f'INSERT INTO "{table}" ({col_str}) VALUES ({placeholders}) RETURNING "id"'
 
-        row = await session.async_fetchone(sql, values)
+        try:
+            row = await session.async_fetchone(sql, values)
+        except duckdb.ConstraintException as e:
+            raise DocumentAlreadyExists(
+                f"{self.__class__.__name__} with id={data.get('id')!r} already exists"
+            ) from e
         if row:
             self.id = row[0]
         return self
@@ -392,7 +435,7 @@ class Document(BaseModel, metaclass=DocumentMeta):
         table = self._get_table_name()
         data = self._to_row_dict()
 
-        if data.get("id") is None:
+        if self._is_auto_increment_id() and data.get("id") is None:
             data.pop("id", None)
 
         columns = list(data.keys())
@@ -401,7 +444,12 @@ class Document(BaseModel, metaclass=DocumentMeta):
         values = [data[c] for c in columns]
 
         sql = f'INSERT INTO "{table}" ({col_str}) VALUES ({placeholders}) RETURNING "id"'
-        row = session.fetchone(sql, values)
+        try:
+            row = session.fetchone(sql, values)
+        except duckdb.ConstraintException as e:
+            raise DocumentAlreadyExists(
+                f"{self.__class__.__name__} with id={data.get('id')!r} already exists"
+            ) from e
         if row:
             self.id = row[0]
         return self
@@ -541,7 +589,7 @@ class Document(BaseModel, metaclass=DocumentMeta):
     # ── Query: get by id ──────────────────────
 
     @classmethod
-    async def get(cls: Type[T], doc_id: int) -> Optional[T]:
+    async def get(cls: Type[T], doc_id: Any) -> Optional[T]:
         """Get a document by its primary key id."""
         session = get_session()
         table = cls._get_table_name()
@@ -553,7 +601,7 @@ class Document(BaseModel, metaclass=DocumentMeta):
         return cls._from_row(row, cls._get_column_names())
 
     @classmethod
-    def get_sync(cls: Type[T], doc_id: int) -> Optional[T]:
+    def get_sync(cls: Type[T], doc_id: Any) -> Optional[T]:
         """Get a document by id synchronously."""
         session = get_session()
         table = cls._get_table_name()

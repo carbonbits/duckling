@@ -40,6 +40,7 @@ from .fields import (
     IndexSpec,
     SortDirection,
 )
+from .ids import generate_ulid
 from .init import init_duckling, init_duckling_sync
 from .operators import (
     And,
@@ -84,6 +85,8 @@ __all__ = [
     "SortDirection",
     "FieldProxy",
     "Expression",
+    # IDs
+    "generate_ulid",
     # Query
     "FindQuery",
     # Operators

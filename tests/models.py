@@ -1,9 +1,12 @@
 """Shared document models used across the test suite."""
 
 import datetime
+import uuid
 from typing import Annotated, List, Optional
 
-from duckling import Document, IndexSpec
+from pydantic import Field
+
+from duckling import Document, IndexSpec, generate_ulid
 
 
 class User(Document):
@@ -39,4 +42,25 @@ class AutoNamed(Document):
     value: str
 
 
-ALL_MODELS = [User, Product, Event, AutoNamed]
+class Session(Document):
+    """Custom string primary key generated with a ULID."""
+
+    id: str = Field(default_factory=generate_ulid)
+    user_email: str
+
+
+class ApiKey(Document):
+    """Custom UUID primary key."""
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4)
+    label: str
+
+
+class Tag(Document):
+    """Custom, caller-supplied string primary key (no default)."""
+
+    id: str
+    name: str
+
+
+ALL_MODELS = [User, Product, Event, AutoNamed, Session, ApiKey, Tag]

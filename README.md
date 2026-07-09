@@ -77,7 +77,8 @@ init_duckling_sync(database="app.db", document_models=[User])
 
 ### Defining Models
 
-Duckling models are Pydantic `BaseModel` subclasses with an auto-generated `id` primary key:
+Duckling models are Pydantic `BaseModel` subclasses. By default, `id` is an
+auto-generated, auto-incrementing integer primary key:
 
 ```python
 from duckling import Document, IndexSpec
@@ -97,6 +98,32 @@ class Product(Document):
 ```
 
 **Supported types:** `str`, `int`, `float`, `bool`, `bytes`, `datetime.date`, `datetime.datetime`, `datetime.time`, `uuid.UUID`, `Optional[T]`, `List[T]` (→ JSON), `dict` (→ JSON), nested Pydantic models (→ JSON), `Enum`.
+
+### Custom Primary Keys (UUID, ULID, string)
+
+Override `id` with any type other than `int` to opt out of the auto-increment
+sequence and use your own primary key — a UUID, a sortable ULID, or a plain
+caller-supplied string:
+
+```python
+import uuid
+from pydantic import Field
+from duckling import Document, generate_ulid
+
+class Session(Document):
+    id: str = Field(default_factory=generate_ulid)   # sortable string PK
+    user_email: str
+
+class ApiKey(Document):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4)  # UUID PK
+    label: str
+
+class Tag(Document):
+    id: str            # no default — caller must supply an id
+    name: str
+```
+
+Inserting a document whose `id` already exists raises `DocumentAlreadyExists`.
 
 ### Indexed Fields
 
