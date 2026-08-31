@@ -27,7 +27,7 @@ from typing import Any, Optional, Sequence, Type
 
 import duckdb
 
-from .connection import DucklingSession, get_session
+from .connection import ConnectionFactory, DucklingSession, get_session
 from .document import Document
 
 
@@ -38,6 +38,7 @@ async def init_duckling(
     config: Optional[dict[str, Any]] = None,
     recreate_tables: bool = False,
     connection: Optional[duckdb.DuckDBPyConnection] = None,
+    connection_factory: Optional[ConnectionFactory] = None,
 ) -> DucklingSession:
     """
     Initialize the Duckling ORM — async version.
@@ -53,6 +54,11 @@ async def init_duckling(
         recreate_tables: If True, drop and recreate all tables.
         connection: An existing DuckDB connection to use. If provided, no new
             connection will be created.
+        connection_factory: A callable returning the connection to use, invoked
+            on every access. Use this instead of `connection` when the host
+            application hands out a connection per thread — a single DuckDB
+            connection driven from two threads segfaults. Takes precedence
+            over `connection`.
 
     Returns:
         The DucklingSession instance.
@@ -72,7 +78,9 @@ async def init_duckling(
     """
     session = get_session()
 
-    if connection is not None:
+    if connection_factory is not None:
+        session.use_connection_factory(connection_factory)
+    elif connection is not None:
         session.use_connection(connection)
     else:
         await asyncio.to_thread(
@@ -101,6 +109,7 @@ def init_duckling_sync(
     config: Optional[dict[str, Any]] = None,
     recreate_tables: bool = False,
     connection: Optional[duckdb.DuckDBPyConnection] = None,
+    connection_factory: Optional[ConnectionFactory] = None,
 ) -> DucklingSession:
     """
     Initialize the Duckling ORM — synchronous version.
@@ -116,13 +125,20 @@ def init_duckling_sync(
         recreate_tables: If True, drop and recreate all tables.
         connection: An existing DuckDB connection to use. If provided, no new
             connection will be created.
+        connection_factory: A callable returning the connection to use, invoked
+            on every access. Use this instead of `connection` when the host
+            application hands out a connection per thread — a single DuckDB
+            connection driven from two threads segfaults. Takes precedence
+            over `connection`.
 
     Returns:
         The DucklingSession instance.
     """
     session = get_session()
 
-    if connection is not None:
+    if connection_factory is not None:
+        session.use_connection_factory(connection_factory)
+    elif connection is not None:
         session.use_connection(connection)
     else:
         session.connect(

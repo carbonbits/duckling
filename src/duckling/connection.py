@@ -6,11 +6,14 @@ import asyncio
 import threading
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import duckdb
 
 from .exceptions import ConnectionError, NotInitializedError
+
+# Returns the connection to use for the calling thread.
+ConnectionFactory = Callable[[], duckdb.DuckDBPyConnection]
 
 
 class DucklingSession:
@@ -26,6 +29,7 @@ class DucklingSession:
 
     def __init__(self) -> None:
         self._connection: Optional[duckdb.DuckDBPyConnection] = None
+        self._connection_factory: Optional[ConnectionFactory] = None
         self._database: Optional[str] = None
         self._config: dict[str, Any] = {}
         self._initialized = False
@@ -40,7 +44,12 @@ class DucklingSession:
 
     @classmethod
     def reset(cls) -> None:
-        """Reset the singleton (useful for testing)."""
+        """Reset the singleton (useful for testing).
+
+        Only closes a connection the session itself is holding. One produced by
+        a connection factory belongs to the caller, so it is dropped rather than
+        closed — closing it would take the host application's handle with it.
+        """
         if cls._instance and cls._instance._connection:
             try:
                 cls._instance._connection.close()
@@ -71,13 +80,47 @@ class DucklingSession:
     def use_connection(self, connection: duckdb.DuckDBPyConnection) -> None:
         """Use an existing DuckDB connection."""
         self._connection = connection
+        self._connection_factory = None
+        self._database = None
+        self._config = {}
+        self._initialized = True
+
+    def use_connection_factory(self, factory: ConnectionFactory) -> None:
+        """Resolve a connection per call instead of holding one.
+
+        A DuckDB connection object cannot be driven from two threads at once —
+        it segfaults the interpreter rather than raising. Holding a single
+        handle therefore confines Duckling to one thread, which is a problem for
+        a host application that already hands out a connection per thread (via
+        `conn.cursor()`, the pattern DuckDB documents for threaded use).
+
+        Pass a callable and it is invoked on every access, so each thread gets
+        its own handle:
+
+            init_duckling_sync(connection_factory=DB.get_connection)
+
+        The factory owns the lifecycle: `reset()` and `close()` will not close
+        what it returns, since the session did not create it.
+        """
+        self._connection_factory = factory
+        self._connection = None
         self._database = None
         self._config = {}
         self._initialized = True
 
     @property
     def connection(self) -> duckdb.DuckDBPyConnection:
-        """Get the active DuckDB connection."""
+        """Get the active DuckDB connection.
+
+        Every query path goes through here, so a factory installed by
+        `use_connection_factory` is consulted for each one.
+        """
+        if self._connection_factory is not None:
+            connection = self._connection_factory()
+            if connection is None:
+                raise NotInitializedError("The configured connection factory returned None.")
+            return connection
+
         if not self._initialized or self._connection is None:
             raise NotInitializedError(
                 "Duckling is not initialized. Call `await init_duckling(...)` first."
@@ -161,11 +204,16 @@ class DucklingSession:
             raise
 
     def close(self) -> None:
-        """Close the connection."""
+        """Close the connection.
+
+        A factory-provided connection is released, not closed: the session did
+        not open it and the caller may still be using it.
+        """
         if self._connection:
             self._connection.close()
-            self._connection = None
-            self._initialized = False
+        self._connection = None
+        self._connection_factory = None
+        self._initialized = False
 
 
 def get_session() -> DucklingSession:

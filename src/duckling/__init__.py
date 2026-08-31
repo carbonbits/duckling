@@ -19,9 +19,7 @@ Duckling — A Beanie-inspired ORM for DuckDB.
     users = await User.find(User.age > 25).sort("+name").limit(10).to_list()
 """
 
-__version__ = "0.1.0"
-
-from .connection import DucklingSession, get_session
+from .connection import ConnectionFactory, DucklingSession, get_session
 from .document import Document
 from .exceptions import (
     CollectionNotFound,
@@ -77,6 +75,7 @@ __all__ = [
     "init_duckling",
     "init_duckling_sync",
     # Session
+    "ConnectionFactory",
     "DucklingSession",
     "get_session",
     # Fields
