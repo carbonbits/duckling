@@ -1,6 +1,25 @@
 # CHANGELOG
 
 
+## v0.1.0 (2026-08-31)
+
+### Features
+
+- Support per-thread connections via connection_factory
+  ([`5830446`](https://github.com/carbonbits/duckling/commit/5830446935a799845dbe72f0ea564f5bbf8a1a61))
+
+Add a `connection_factory` option to `init_duckling` / `init_duckling_sync` that resolves the DuckDB
+  connection on every access instead of holding a single handle. A DuckDB connection driven from two
+  threads segfaults, so host applications that hand out a connection per thread (e.g. via
+  `conn.cursor()`) can now pass a callable and each thread gets its own handle. The factory owns the
+  connection lifecycle: `close()` and `reset()` release factory-provided connections without closing
+  them. Takes precedence over `connection` when both are given.
+
+Also remove the hardcoded `__version__` from `duckling/__init__.py` — it had drifted from
+  pyproject.toml (0.1.0 vs 0.0.4) and was read nowhere; pyproject.toml is the single source of truth
+  and `importlib.metadata.version("duckling"` serves runtime lookups.
+
+
 ## v0.0.4 (2026-07-09)
 
 ### Bug Fixes
