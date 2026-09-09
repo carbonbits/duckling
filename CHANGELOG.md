@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.1.1 (2026-09-09)
+
+### Refactoring
+
+- Allow for no id documents to work with the library
+  ([`844e595`](https://github.com/carbonbits/duckling/commit/844e595f83a395708ceb2d080485267c3c3a4605))
+
+
 ## v0.1.0 (2026-08-31)
 
 ### Features
