@@ -63,4 +63,37 @@ class Tag(Document):
     name: str
 
 
-ALL_MODELS = [User, Product, Event, AutoNamed, Session, ApiKey, Tag]
+class LooseTag(Document):
+    """Non-integer primary key with no default — the caller must supply one."""
+
+    id: Optional[str] = None
+    name: str
+
+
+class Ticket(Document):
+    """Primary key and a regular field stored under renamed columns."""
+
+    id: str = Field(default_factory=generate_ulid, alias="key")
+    subject: str
+    priority: int = Field(default=0, alias="prio")
+
+
+class Machine(Document):
+    """Auto-increment primary key stored in a column named "machine_id"."""
+
+    id: Optional[int] = Field(default=None, alias="machine_id")
+    hostname: Annotated[str, IndexSpec(unique=True)] = Field(alias="host_name")
+
+
+ALL_MODELS = [
+    User,
+    Product,
+    Event,
+    AutoNamed,
+    Session,
+    ApiKey,
+    Tag,
+    LooseTag,
+    Ticket,
+    Machine,
+]

@@ -4,9 +4,9 @@ import uuid
 
 import pytest
 
-from duckling import DocumentAlreadyExists, get_session
+from duckling import DocumentAlreadyExists, InvalidQueryError, get_session
 
-from .models import ApiKey, Session, Tag
+from .models import ApiKey, LooseTag, Session, Tag
 
 
 class TestSyncCustomIds:
@@ -40,6 +40,15 @@ class TestSyncCustomIds:
         Tag(id="dup", name="First").insert_sync()
         with pytest.raises(DocumentAlreadyExists):
             Tag(id="dup", name="Second").insert_sync()
+
+    def test_missing_non_integer_id_raises(self, sync_db):
+        with pytest.raises(InvalidQueryError, match="no value and no default"):
+            LooseTag(name="Orphan").insert_sync()
+
+    def test_supplied_non_integer_id_inserts(self, sync_db):
+        LooseTag(id="ok", name="Fine").insert_sync()
+
+        assert LooseTag.get_sync("ok").name == "Fine"
 
     def test_no_sequence_created_for_string_id_model(self, sync_db):
         session = get_session()

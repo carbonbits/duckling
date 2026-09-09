@@ -1,93 +1,18 @@
-"""
-Query builder for Duckling — fluent, chainable queries inspired by Beanie.
-
-Usage:
-    # Chain methods to build queries
-    users = await User.find(User.age > 25).sort("+name").limit(10).to_list()
-    user  = await User.find_one(User.name == "Alice")
-    count = await User.find(User.active == True).count()
-
-    # Projection (select specific fields)
-    names = await User.find().project(name=1, email=1).to_list()
-
-    # Aggregation
-    stats = await User.find().aggregate(avg_age=Avg("age"), total=Count())
-"""
+"""FindQuery — the fluent, chainable query builder."""
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any, Generic, Optional, Type, TypeVar
 
-from .connection import get_session
-from .fields import Expression, FieldProxy, SortDirection
+from ..aggregations import AggFunc
+from ..connection import get_session
+from ..expressions import Expression
+from ..fields import SortDirection
+from .iterator import FindQueryIterator
 
 T = TypeVar("T")
 
 
-# ──────────────────────────────────────────────
-# Aggregation functions
-# ──────────────────────────────────────────────
-class AggFunc:
-    """Base aggregation function."""
-
-    def to_sql(self) -> str:
-        raise NotImplementedError
-
-
-class Count(AggFunc):
-    def __init__(self, field: str = "*"):
-        self.field = field
-
-    def to_sql(self) -> str:
-        if self.field == "*":
-            return "COUNT(*)"
-        return f'COUNT("{self.field}")'
-
-
-class Sum(AggFunc):
-    def __init__(self, field: str):
-        self.field = field
-
-    def to_sql(self) -> str:
-        return f'SUM("{self.field}")'
-
-
-class Avg(AggFunc):
-    def __init__(self, field: str):
-        self.field = field
-
-    def to_sql(self) -> str:
-        return f'AVG("{self.field}")'
-
-
-class Min(AggFunc):
-    def __init__(self, field: str):
-        self.field = field
-
-    def to_sql(self) -> str:
-        return f'MIN("{self.field}")'
-
-
-class Max(AggFunc):
-    def __init__(self, field: str):
-        self.field = field
-
-    def to_sql(self) -> str:
-        return f'MAX("{self.field}")'
-
-
-class CountDistinct(AggFunc):
-    def __init__(self, field: str):
-        self.field = field
-
-    def to_sql(self) -> str:
-        return f'COUNT(DISTINCT "{self.field}")'
-
-
-# ──────────────────────────────────────────────
-# FindQuery — the main query builder
-# ──────────────────────────────────────────────
 class FindQuery(Generic[T]):
     """
     A fluent, chainable query builder for finding documents.
@@ -126,16 +51,17 @@ class FindQuery(Generic[T]):
         for key in keys:
             if isinstance(key, str):
                 if key.startswith("-"):
-                    self._sort_clauses.append((key[1:], SortDirection.DESCENDING))
+                    name, direction = key[1:], SortDirection.DESCENDING
                 elif key.startswith("+"):
-                    self._sort_clauses.append((key[1:], SortDirection.ASCENDING))
+                    name, direction = key[1:], SortDirection.ASCENDING
                 else:
-                    self._sort_clauses.append((key, SortDirection.ASCENDING))
+                    name, direction = key, SortDirection.ASCENDING
+                self._sort_clauses.append((self._column(name), direction))
             elif isinstance(key, tuple) and len(key) == 2:
                 field_name, direction = key
                 if isinstance(direction, int):
                     direction = SortDirection(direction)
-                self._sort_clauses.append((field_name, direction))
+                self._sort_clauses.append((self._column(field_name), direction))
         return self
 
     def limit(self, n: int) -> FindQuery[T]:
@@ -159,13 +85,17 @@ class FindQuery(Generic[T]):
         for name, include in named_fields.items():
             if include:
                 proj.append(name)
-        self._projection = proj
+        self._projection = [self._column(name) for name in proj]
         return self
 
     # ── SQL Generation ────────────────────────
 
     def _get_table_name(self) -> str:
         return self._document_class._get_table_name()
+
+    def _column(self, field_name: str) -> str:
+        """Resolve a caller-supplied field name to its column name."""
+        return self._document_class._get_column_name(field_name)
 
     def _build_where(self) -> tuple[str, list]:
         if not self._conditions:
@@ -183,11 +113,11 @@ class FindQuery(Generic[T]):
     def _build_select_sql(self) -> tuple[str, list]:
         table = self._get_table_name()
 
-        # Columns
+        # Columns — always explicit, since _from_row maps rows positionally
         if self._projection:
             cols = ", ".join(f'"{c}"' for c in self._projection)
         else:
-            cols = "*"
+            cols = self._document_class._select_columns_sql()
 
         sql = f'SELECT {cols} FROM "{table}"'
         params: list = []
@@ -244,7 +174,7 @@ class FindQuery(Generic[T]):
         params: list = []
 
         for col, val in updates.items():
-            set_parts.append(f'"{col}" = ?')
+            set_parts.append(f'"{self._column(col)}" = ?')
             params.append(val)
 
         sql = f'UPDATE "{table}" SET {", ".join(set_parts)}'
@@ -255,6 +185,25 @@ class FindQuery(Generic[T]):
             params.extend(where_params)
 
         return sql, params
+
+    def _build_aggregate_sql(self, agg_funcs: dict[str, AggFunc]) -> tuple[str, list]:
+        table = self._get_table_name()
+        agg_parts = []
+        for alias, func in agg_funcs.items():
+            agg_parts.append(f'{func.to_sql(self._column)} AS "{alias}"')
+
+        sql = f'SELECT {", ".join(agg_parts)} FROM "{table}"'
+        params: list = []
+
+        where_sql, where_params = self._build_where()
+        if where_sql:
+            sql += f" WHERE {where_sql}"
+            params.extend(where_params)
+
+        return sql, params
+
+    def _column_names(self) -> list[str]:
+        return self._projection or self._document_class._get_column_names()
 
     # ── Execution (async) ─────────────────────
 
@@ -267,11 +216,7 @@ class FindQuery(Generic[T]):
         if not rows:
             return []
 
-        # Get column names
-        col_names = self._projection or list(self._document_class.model_fields.keys())
-        if not self._projection:
-            col_names = self._document_class._get_column_names()
-
+        col_names = self._column_names()
         return [self._document_class._from_row(row, col_names) for row in rows]
 
     async def first_or_none(self) -> Optional[T]:
@@ -315,19 +260,7 @@ class FindQuery(Generic[T]):
                 max_age=Max("age"),
             )
         """
-        table = self._get_table_name()
-        agg_parts = []
-        for alias, func in agg_funcs.items():
-            agg_parts.append(f'{func.to_sql()} AS "{alias}"')
-
-        sql = f'SELECT {", ".join(agg_parts)} FROM "{table}"'
-        params: list = []
-
-        where_sql, where_params = self._build_where()
-        if where_sql:
-            sql += f" WHERE {where_sql}"
-            params.extend(where_params)
-
+        sql, params = self._build_aggregate_sql(agg_funcs)
         session = get_session()
         row = await session.async_fetchone(sql, params)
         if row is None:
@@ -351,7 +284,7 @@ class FindQuery(Generic[T]):
         if not rows:
             return []
 
-        col_names = self._projection or self._document_class._get_column_names()
+        col_names = self._column_names()
         return [self._document_class._from_row(row, col_names) for row in rows]
 
     def first_or_none_sync(self) -> Optional[T]:
@@ -371,21 +304,3 @@ class FindQuery(Generic[T]):
 
     def __aiter__(self):
         return FindQueryIterator(self)
-
-
-class FindQueryIterator:
-    """Async iterator for FindQuery results."""
-
-    def __init__(self, query: FindQuery) -> None:
-        self._query = query
-        self._results: Optional[list] = None
-        self._index = 0
-
-    async def __anext__(self):
-        if self._results is None:
-            self._results = await self._query.to_list()
-        if self._index >= len(self._results):
-            raise StopAsyncIteration
-        item = self._results[self._index]
-        self._index += 1
-        return item

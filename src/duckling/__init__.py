@@ -19,6 +19,15 @@ Duckling — A Beanie-inspired ORM for DuckDB.
     users = await User.find(User.age > 25).sort("+name").limit(10).to_list()
 """
 
+from .aggregations import (
+    AggFunc,
+    Avg,
+    Count,
+    CountDistinct,
+    Max,
+    Min,
+    Sum,
+)
 from .connection import ConnectionFactory, DucklingSession, get_session
 from .document import Document
 from .exceptions import (
@@ -31,8 +40,8 @@ from .exceptions import (
     NotInitializedError,
     ValidationError,
 )
+from .expressions import Expression
 from .fields import (
-    Expression,
     FieldProxy,
     Indexed,
     IndexSpec,
@@ -59,15 +68,7 @@ from .operators import (
     Or,
     Raw,
 )
-from .query import (
-    Avg,
-    Count,
-    CountDistinct,
-    FindQuery,
-    Max,
-    Min,
-    Sum,
-)
+from .query import FindQuery
 
 __all__ = [
     # Core
@@ -107,6 +108,7 @@ __all__ = [
     "IsNotNull",
     "Raw",
     # Aggregation
+    "AggFunc",
     "Count",
     "CountDistinct",
     "Sum",

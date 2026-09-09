@@ -30,13 +30,10 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import datetime
-import uuid
+import re
+import typing
 from typing import (
     Any,
-    ClassVar,
-    Dict,
-    List,
     Optional,
     Sequence,
     Type,
@@ -49,171 +46,19 @@ from typing import (
 import duckdb
 from pydantic import BaseModel, ConfigDict
 
-from .connection import DucklingSession, get_session
-from .exceptions import DocumentAlreadyExists, DocumentNotFound, InvalidQueryError
-from .fields import Expression, FieldProxy, IndexSpec, SortDirection
-from .query import FindQuery
+from ..connection import get_session
+from ..exceptions import DocumentAlreadyExists, DocumentNotFound, InvalidQueryError
+from ..expressions import Expression
+from ..fields import IndexSpec
+from ..query import FindQuery
+from .meta import DocumentMeta
+from .types import (
+    duckdb_value_to_python,
+    python_type_to_duckdb,
+    python_value_to_duckdb,
+)
 
 T = TypeVar("T", bound="Document")
-
-# Python → DuckDB type mapping
-_TYPE_MAP: dict[type, str] = {
-    int: "BIGINT",
-    float: "DOUBLE",
-    str: "VARCHAR",
-    bool: "BOOLEAN",
-    bytes: "BLOB",
-    datetime.date: "DATE",
-    datetime.datetime: "TIMESTAMP",
-    datetime.time: "TIME",
-    uuid.UUID: "UUID",
-}
-
-
-def _python_type_to_duckdb(py_type: Any) -> str:
-    """Convert a Python / Pydantic type annotation to a DuckDB column type."""
-    # Handle Optional[X]
-    origin = get_origin(py_type)
-    if origin is type(None):
-        return "VARCHAR"
-
-    # Optional[X] shows up as Union[X, None]
-    args = get_args(py_type)
-    if args:
-        # typing.Annotated — check for IndexSpec
-        import typing
-        if origin is getattr(typing, "Annotated", None):
-            # First arg is the actual type
-            return _python_type_to_duckdb(args[0])
-
-        # Union types (Optional)
-        non_none = [a for a in args if a is not type(None)]
-        if non_none:
-            return _python_type_to_duckdb(non_none[0])
-
-    # List/dict → JSON-like storage
-    if origin in (list, List, dict, Dict):
-        return "JSON"
-
-    # Direct lookup
-    if py_type in _TYPE_MAP:
-        return _TYPE_MAP[py_type]
-
-    # Enum
-    import enum
-    if isinstance(py_type, type) and issubclass(py_type, enum.Enum):
-        return "VARCHAR"
-
-    # Nested Pydantic model → JSON
-    if isinstance(py_type, type) and issubclass(py_type, BaseModel):
-        return "JSON"
-
-    return "VARCHAR"
-
-
-def _python_value_to_duckdb(value: Any) -> Any:
-    """Convert a Python value for DuckDB insertion."""
-    if value is None:
-        return None
-    if isinstance(value, (BaseModel,)):
-        return value.model_dump_json()
-    if isinstance(value, (dict, list)):
-        import json
-        return json.dumps(value)
-    if isinstance(value, uuid.UUID):
-        return str(value)
-    import enum
-    if isinstance(value, enum.Enum):
-        return value.value
-    return value
-
-
-def _duckdb_value_to_python(value: Any, py_type: Any) -> Any:
-    """Convert a DuckDB value back to the expected Python type."""
-    if value is None:
-        return None
-
-    origin = get_origin(py_type)
-    args = get_args(py_type)
-
-    # Handle Annotated
-    import typing
-    if origin is getattr(typing, "Annotated", None) and args:
-        py_type = args[0]
-        origin = get_origin(py_type)
-        args = get_args(py_type)
-
-    # Handle Optional
-    if args:
-        non_none = [a for a in args if a is not type(None)]
-        if non_none:
-            py_type = non_none[0]
-            origin = get_origin(py_type)
-            args = get_args(py_type)
-
-    # Nested Pydantic model
-    if isinstance(py_type, type) and issubclass(py_type, BaseModel):
-        import json
-        if isinstance(value, str):
-            return py_type.model_validate_json(value)
-        if isinstance(value, dict):
-            return py_type.model_validate(value)
-
-    # List / Dict from JSON
-    if origin in (list, List, dict, Dict):
-        import json
-        if isinstance(value, str):
-            return json.loads(value)
-        return value
-
-    # UUID
-    if py_type is uuid.UUID:
-        if isinstance(value, str):
-            return uuid.UUID(value)
-        return value
-
-    # Enum
-    import enum
-    if isinstance(py_type, type) and issubclass(py_type, enum.Enum):
-        return py_type(value)
-
-    return value
-
-
-class DocumentMeta(type(BaseModel)):
-    """
-    Metaclass for Document that installs FieldProxy descriptors on the class,
-    enabling `User.name == "Alice"` style query expressions.
-    """
-
-    def __new__(mcs, name: str, bases: tuple, namespace: dict, **kwargs):
-        cls = super().__new__(mcs, name, bases, namespace, **kwargs)
-
-        # Skip the base Document class itself
-        if name == "Document" and not any(
-            hasattr(b, "_is_duckling_document") for b in bases
-        ):
-            cls._is_duckling_document = True
-            return cls
-
-        # For every model field, create a FieldProxy accessible on the class
-        cls._field_proxies = {}
-        for field_name, field_info in cls.model_fields.items():
-            proxy = FieldProxy(field_name, field_info.annotation)
-            cls._field_proxies[field_name] = proxy
-
-        return cls
-
-    def __getattr__(cls, name: str):
-        # Return FieldProxy for query building when accessing fields on the class
-        if name.startswith("_") or name == "model_fields":
-            raise AttributeError(name)
-        proxies = cls.__dict__.get("_field_proxies", {})
-        if name in proxies:
-            return proxies[name]
-        raise AttributeError(
-            f"type object {cls.__name__!r} has no attribute {name!r}"
-        )
 
 
 class Document(BaseModel, metaclass=DocumentMeta):
@@ -254,29 +99,63 @@ class Document(BaseModel, metaclass=DocumentMeta):
         if hasattr(cls, "Settings") and hasattr(cls.Settings, "table_name") and cls.Settings.table_name:
             return cls.Settings.table_name
         # Auto-generate from class name: UserProfile → user_profile
-        import re
         name = cls.__name__
         return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
 
+    # ── Field ↔ column name mapping ───────────
+
+    @classmethod
+    def _get_column_name(cls, field_name: str) -> str:
+        """
+        The database column backing a model field.
+
+        A field declared with `Field(alias=...)` is stored under its alias, so
+        the Python attribute and the column can differ:
+
+            class Tag(Document):
+                id: str = Field(alias="key")   # self.id ↔ the "key" column
+
+        Names that are not model fields pass through unchanged, which makes
+        this safe to apply to strings that are already column names.
+        """
+        field = cls.model_fields.get(field_name)
+        if field is not None and field.alias:
+            return field.alias
+        return field_name
+
+    @classmethod
+    def _get_pk_column(cls) -> str:
+        """The column holding the primary key. `self.id` always maps to it."""
+        return cls._get_column_name("id")
+
     @classmethod
     def _get_column_names(cls) -> list[str]:
-        return list(cls.model_fields.keys())
+        return [cls._get_column_name(name) for name in cls.model_fields]
+
+    @classmethod
+    def _select_columns_sql(cls) -> str:
+        """
+        An explicit, quoted column list for SELECT.
+
+        Never use `SELECT *`: rows are mapped back onto fields positionally by
+        `_from_row`, so the projection order must be the model's field order
+        rather than whatever order the table happens to have on disk.
+        """
+        return ", ".join(f'"{c}"' for c in cls._get_column_names())
 
     @classmethod
     def _get_column_types(cls) -> dict[str, str]:
-        """Map field names to DuckDB column types."""
-        import typing
+        """Map column names to DuckDB column types."""
         hints = get_type_hints(cls, include_extras=True)
         result = {}
         for name in cls.model_fields:
             py_type = hints.get(name, str)
-            result[name] = _python_type_to_duckdb(py_type)
+            result[cls._get_column_name(name)] = python_type_to_duckdb(py_type)
         return result
 
     @classmethod
     def _get_indexed_fields(cls) -> list[tuple[str, IndexSpec]]:
-        """Return fields that have Indexed() annotations."""
-        import typing
+        """Return (column_name, spec) for fields with Indexed() annotations."""
         hints = get_type_hints(cls, include_extras=True)
         indexed = []
         for name in cls.model_fields:
@@ -285,7 +164,7 @@ class Document(BaseModel, metaclass=DocumentMeta):
                 args = get_args(py_type)
                 for arg in args[1:]:
                     if isinstance(arg, IndexSpec):
-                        indexed.append((name, arg))
+                        indexed.append((cls._get_column_name(name), arg))
         return indexed
 
     # ── Primary key strategy ──────────────────
@@ -299,8 +178,6 @@ class Document(BaseModel, metaclass=DocumentMeta):
         Any other resolved type (str, uuid.UUID, ...) is treated as a
         caller/default_factory-supplied primary key with no sequence.
         """
-        import typing
-
         hints = get_type_hints(cls, include_extras=True)
         py_type = hints.get("id", int)
 
@@ -325,15 +202,17 @@ class Document(BaseModel, metaclass=DocumentMeta):
         table = cls._get_table_name()
         col_types = cls._get_column_types()
         indexed = dict(cls._get_indexed_fields())
+        pk = cls._get_pk_column()
 
         if cls._is_auto_increment_id():
-            id_def = f'"id" INTEGER PRIMARY KEY DEFAULT(nextval(\'seq_{table}_id\'))'
+            seq = cls._get_sequence_name()
+            id_def = f'"{pk}" INTEGER PRIMARY KEY DEFAULT(nextval(\'{seq}\'))'
         else:
-            id_def = f'"id" {col_types["id"]} PRIMARY KEY'
+            id_def = f'"{pk}" {col_types[pk]} PRIMARY KEY'
 
         columns = []
         for col_name, col_type in col_types.items():
-            if col_name == "id":
+            if col_name == pk:
                 continue
             parts = [f'"{col_name}"', col_type]
             if col_name in indexed and indexed[col_name].unique:
@@ -345,11 +224,15 @@ class Document(BaseModel, metaclass=DocumentMeta):
         return f'CREATE TABLE IF NOT EXISTS "{table}" (\n  ' + ",\n  ".join(col_defs) + "\n)"
 
     @classmethod
+    def _get_sequence_name(cls) -> str:
+        """Name of the sequence backing an auto-increment primary key."""
+        return f"seq_{cls._get_table_name()}_{cls._get_pk_column()}"
+
+    @classmethod
     def _build_sequence_sql(cls) -> Optional[str]:
         if not cls._is_auto_increment_id():
             return None
-        table = cls._get_table_name()
-        return f"CREATE SEQUENCE IF NOT EXISTS seq_{table}_id START 1"
+        return f"CREATE SEQUENCE IF NOT EXISTS {cls._get_sequence_name()} START 1"
 
     @classmethod
     def _create_table_sync(cls) -> None:
@@ -381,50 +264,74 @@ class Document(BaseModel, metaclass=DocumentMeta):
 
     def _to_row_dict(self) -> dict[str, Any]:
         """Convert this document to a dict of column → value for DuckDB."""
+        cls = type(self)
         data = {}
-        for name in self.model_fields:
+        for name in cls.model_fields:
             val = getattr(self, name)
-            data[name] = _python_value_to_duckdb(val)
+            data[cls._get_column_name(name)] = python_value_to_duckdb(val)
         return data
+
+    @classmethod
+    def _get_field_names_by_column(cls) -> dict[str, str]:
+        """Reverse of the field → column mapping."""
+        return {cls._get_column_name(name): name for name in cls.model_fields}
 
     @classmethod
     def _from_row(cls: Type[T], row: tuple, columns: list[str]) -> T:
         """Create a document instance from a database row."""
-        import typing
         hints = get_type_hints(cls, include_extras=True)
+        fields_by_column = cls._get_field_names_by_column()
         data = {}
         for col_name, value in zip(columns, row):
-            py_type = hints.get(col_name, str)
-            data[col_name] = _duckdb_value_to_python(value, py_type)
+            # Values arrive keyed by column; convert using the field's declared
+            # type and hand Pydantic the field name (populate_by_name is on).
+            field_name = fields_by_column.get(col_name, col_name)
+            py_type = hints.get(field_name, str)
+            data[field_name] = duckdb_value_to_python(value, py_type)
         return cls.model_validate(data)
 
     # ── CRUD: Insert ──────────────────────────
 
-    async def insert(self: T) -> T:
-        """Insert this document into the database."""
-        session = get_session()
+    def _build_insert_sql(self) -> tuple[str, list, dict[str, Any]]:
+        """Build the INSERT for this document, returning (sql, values, data)."""
         table = self._get_table_name()
+        pk = self._get_pk_column()
         data = self._to_row_dict()
 
-        # Remove id if None so the auto-increment sequence default applies.
-        # A non-auto-increment (str/UUID) id left None is kept so the
-        # missing-primary-key error surfaces from the database.
-        if self._is_auto_increment_id() and data.get("id") is None:
-            data.pop("id", None)
+        if data.get(pk) is None:
+            if self._is_auto_increment_id():
+                # Drop it so the sequence default supplies the value.
+                data.pop(pk, None)
+            else:
+                raise InvalidQueryError(
+                    f"{type(self).__name__}.id has no value and no default. "
+                    f"A non-integer primary key must be supplied by the caller "
+                    f"or by a default_factory."
+                )
 
         columns = list(data.keys())
         placeholders = ", ".join("?" for _ in columns)
         col_str = ", ".join(f'"{c}"' for c in columns)
         values = [data[c] for c in columns]
 
-        sql = f'INSERT INTO "{table}" ({col_str}) VALUES ({placeholders}) RETURNING "id"'
+        sql = f'INSERT INTO "{table}" ({col_str}) VALUES ({placeholders}) RETURNING "{pk}"'
+        return sql, values, data
+
+    def _already_exists_error(self, data: dict[str, Any]) -> DocumentAlreadyExists:
+        pk_value = data.get(self._get_pk_column())
+        return DocumentAlreadyExists(
+            f"{type(self).__name__} with id={pk_value!r} already exists"
+        )
+
+    async def insert(self: T) -> T:
+        """Insert this document into the database."""
+        session = get_session()
+        sql, values, data = self._build_insert_sql()
 
         try:
             row = await session.async_fetchone(sql, values)
         except duckdb.ConstraintException as e:
-            raise DocumentAlreadyExists(
-                f"{self.__class__.__name__} with id={data.get('id')!r} already exists"
-            ) from e
+            raise self._already_exists_error(data) from e
         if row:
             self.id = row[0]
         return self
@@ -432,24 +339,12 @@ class Document(BaseModel, metaclass=DocumentMeta):
     def insert_sync(self: T) -> T:
         """Insert this document synchronously."""
         session = get_session()
-        table = self._get_table_name()
-        data = self._to_row_dict()
+        sql, values, data = self._build_insert_sql()
 
-        if self._is_auto_increment_id() and data.get("id") is None:
-            data.pop("id", None)
-
-        columns = list(data.keys())
-        placeholders = ", ".join("?" for _ in columns)
-        col_str = ", ".join(f'"{c}"' for c in columns)
-        values = [data[c] for c in columns]
-
-        sql = f'INSERT INTO "{table}" ({col_str}) VALUES ({placeholders}) RETURNING "id"'
         try:
             row = session.fetchone(sql, values)
         except duckdb.ConstraintException as e:
-            raise DocumentAlreadyExists(
-                f"{self.__class__.__name__} with id={data.get('id')!r} already exists"
-            ) from e
+            raise self._already_exists_error(data) from e
         if row:
             self.id = row[0]
         return self
@@ -459,12 +354,6 @@ class Document(BaseModel, metaclass=DocumentMeta):
     @classmethod
     async def insert_many(cls: Type[T], documents: Sequence[T]) -> list[T]:
         """Bulk insert multiple documents."""
-        if not documents:
-            return []
-
-        session = get_session()
-        table = cls._get_table_name()
-
         results = []
         for doc in documents:
             inserted = await doc.insert()
@@ -486,37 +375,35 @@ class Document(BaseModel, metaclass=DocumentMeta):
         """
         if self.id is not None:
             session = get_session()
-            table = self._get_table_name()
-            data = self._to_row_dict()
-            data.pop("id")
-
-            if not data:
+            sql, values = self._build_update_sql()
+            if sql is None:
                 return self
-
-            set_parts = [f'"{col}" = ?' for col in data]
-            values = list(data.values()) + [self.id]
-
-            sql = f'UPDATE "{table}" SET {", ".join(set_parts)} WHERE "id" = ?'
             await session.async_execute(sql, values)
             return self
         else:
             return await self.insert()
 
+    def _build_update_sql(self) -> tuple[Optional[str], list]:
+        """Build the UPDATE for this document, or (None, []) if it has no columns."""
+        table = self._get_table_name()
+        pk = self._get_pk_column()
+        data = self._to_row_dict()
+        data.pop(pk, None)
+
+        if not data:
+            return None, []
+
+        set_parts = [f'"{col}" = ?' for col in data]
+        values = list(data.values()) + [self.id]
+        return f'UPDATE "{table}" SET {", ".join(set_parts)} WHERE "{pk}" = ?', values
+
     def save_sync(self: T) -> T:
         """Save (upsert) this document synchronously."""
         if self.id is not None:
             session = get_session()
-            table = self._get_table_name()
-            data = self._to_row_dict()
-            data.pop("id")
-
-            if not data:
+            sql, values = self._build_update_sql()
+            if sql is None:
                 return self
-
-            set_parts = [f'"{col}" = ?' for col in data]
-            values = list(data.values()) + [self.id]
-
-            sql = f'UPDATE "{table}" SET {", ".join(set_parts)} WHERE "id" = ?'
             session.execute(sql, values)
             return self
         else:
@@ -531,7 +418,8 @@ class Document(BaseModel, metaclass=DocumentMeta):
 
         session = get_session()
         table = self._get_table_name()
-        await session.async_execute(f'DELETE FROM "{table}" WHERE "id" = ?', [self.id])
+        pk = self._get_pk_column()
+        await session.async_execute(f'DELETE FROM "{table}" WHERE "{pk}" = ?', [self.id])
 
     def delete_sync(self) -> None:
         """Delete this document synchronously."""
@@ -540,7 +428,8 @@ class Document(BaseModel, metaclass=DocumentMeta):
 
         session = get_session()
         table = self._get_table_name()
-        session.execute(f'DELETE FROM "{table}" WHERE "id" = ?', [self.id])
+        pk = self._get_pk_column()
+        session.execute(f'DELETE FROM "{table}" WHERE "{pk}" = ?', [self.id])
 
     # ── CRUD: Delete All ──────────────────────
 
@@ -594,7 +483,9 @@ class Document(BaseModel, metaclass=DocumentMeta):
         session = get_session()
         table = cls._get_table_name()
         row = await session.async_fetchone(
-            f'SELECT * FROM "{table}" WHERE "id" = ?', [doc_id]
+            f'SELECT {cls._select_columns_sql()} FROM "{table}" '
+            f'WHERE "{cls._get_pk_column()}" = ?',
+            [doc_id],
         )
         if row is None:
             return None
@@ -606,7 +497,9 @@ class Document(BaseModel, metaclass=DocumentMeta):
         session = get_session()
         table = cls._get_table_name()
         row = session.fetchone(
-            f'SELECT * FROM "{table}" WHERE "id" = ?', [doc_id]
+            f'SELECT {cls._select_columns_sql()} FROM "{table}" '
+            f'WHERE "{cls._get_pk_column()}" = ?',
+            [doc_id],
         )
         if row is None:
             return None
@@ -635,12 +528,12 @@ class Document(BaseModel, metaclass=DocumentMeta):
         if fresh is None:
             raise DocumentNotFound(f"{self.__class__.__name__} with id={self.id} not found")
 
-        for field_name in self.model_fields:
+        for field_name in type(self).model_fields:
             setattr(self, field_name, getattr(fresh, field_name))
         return self
 
     # ── Repr ──────────────────────────────────
 
     def __repr__(self) -> str:
-        fields = ", ".join(f"{k}={getattr(self, k)!r}" for k in self.model_fields)
+        fields = ", ".join(f"{k}={getattr(self, k)!r}" for k in type(self).model_fields)
         return f"{self.__class__.__name__}({fields})"

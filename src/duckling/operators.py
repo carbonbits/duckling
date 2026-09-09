@@ -22,19 +22,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from .fields import (
+from .expressions import (
     AndExpression,
     BetweenExpression,
+    ComparisonExpression,
     Expression,
     InExpression,
     LikeExpression,
     NotExpression,
     OrExpression,
     RawExpression,
-    ComparisonExpression,
-    FieldProxy,
 )
-
+from .fields import FieldProxy
 
 # ──────────────────────────────────────────────
 # Functional operator constructors

@@ -125,6 +125,43 @@ class Tag(Document):
 
 Inserting a document whose `id` already exists raises `DocumentAlreadyExists`.
 
+A non-integer `id` with no default must be supplied by the caller; inserting one
+that is still `None` raises `InvalidQueryError`.
+
+### Renaming Columns (including the primary key)
+
+Any field can be stored under a different column name with `Field(alias=...)`.
+The Python attribute keeps its name, so `id` remains the primary-key handle even
+when the column is called something else:
+
+```python
+from pydantic import Field
+from duckling import Document, generate_ulid
+
+class Ticket(Document):
+    id: str = Field(default_factory=generate_ulid, alias="key")   # → "key" column
+    subject: str
+    priority: int = Field(default=0, alias="prio")                # → "prio" column
+```
+
+```python
+ticket = Ticket(subject="Printer down", priority=2)
+await ticket.insert()
+
+await Ticket.get(ticket.id)                       # WHERE "key" = ?
+await Ticket.find(Ticket.priority > 5).to_list()  # WHERE "prio" > ?
+await Ticket.find_all().sort("-priority")         # ORDER BY "prio" DESC
+```
+
+Aliases apply everywhere a column is addressed: `CREATE TABLE`, indexes and
+`UNIQUE` constraints, the auto-increment sequence name, filters, sorts,
+projections and aggregations. Both spellings work as constructor arguments
+(`Ticket(priority=2)` and `Ticket(prio=2)`), and `sort()`/`project()`/`Avg()`
+accept either the field name or the column name.
+
+Two fields that map to the same column raise `InvalidQueryError` when the model
+class is defined.
+
 ### Indexed Fields
 
 ```python
@@ -326,19 +363,67 @@ rows = session.fetchall("SELECT count(*) FROM users")
 
 ## Project Structure
 
+Classes live one per module, with each package's `__init__.py` re-exporting them
+so import paths stay stable as the layout evolves.
+
 ```
 src/duckling/
-├── __init__.py         # Public exports
-├── connection.py       # DuckDB session management
-├── document.py         # Document base class (the core)
-├── fields.py           # FieldProxy, Indexed, Expression types
-├── init.py             # init_duckling() / init_duckling_sync()
-├── operators.py        # And, Or, In, Between, Like, etc.
-├── query.py            # FindQuery builder + aggregation
-└── exceptions.py       # Custom exceptions
+├── __init__.py           # Public exports
+├── connection.py         # DuckDB session management
+├── init.py               # init_duckling() / init_duckling_sync()
+├── operators.py          # And, Or, In, Between, Like, … (functions)
+├── ids.py                # generate_ulid()
+├── exceptions.py         # Custom exceptions
+├── document/
+│   ├── base.py           # Document — the core
+│   ├── meta.py           # DocumentMeta (class-level field access)
+│   └── types.py          # Python ↔ DuckDB type and value conversion
+├── fields/
+│   ├── proxy.py          # FieldProxy
+│   ├── index_spec.py     # IndexSpec, Indexed()
+│   └── sort.py           # SortDirection
+├── expressions/
+│   ├── base.py           # Expression
+│   ├── comparison.py     # ComparisonExpression
+│   ├── inclusion.py      # InExpression
+│   ├── between.py        # BetweenExpression
+│   ├── like.py           # LikeExpression
+│   ├── raw.py            # RawExpression
+│   ├── conjunction.py    # AndExpression
+│   ├── disjunction.py    # OrExpression
+│   └── negation.py       # NotExpression
+├── aggregations/
+│   ├── base.py           # AggFunc
+│   └── count.py, count_distinct.py, sum.py, avg.py, min.py, max.py
+└── query/
+    ├── find_query.py     # FindQuery builder
+    └── iterator.py       # FindQueryIterator
 
-tests/                  # Per-module tests (test_document.py, test_query.py, …)
+tests/                    # Per-module tests (test_document.py, test_query.py, …)
 ```
+
+`duckling.fields` re-exports the expression classes and `duckling.query`
+re-exports the aggregation functions, so `from duckling.fields import Expression`
+and `from duckling.query import Avg` still resolve.
+
+---
+
+## TODO
+
+- **Require an explicit `id` declaration.** Today every model inherits
+  `id: Optional[int] = None` from `Document`, so an auto-increment integer
+  primary key is the silent default. Making the declaration mandatory would
+  force models to state their key strategy, at the cost of a breaking change to
+  every existing model plus the examples in this README. Deferred — revisit
+  before 1.0, when it is still cheap.
+- **Split up `Document`.** Every other class now has its own module, but
+  `document/base.py` still carries table DDL, row serialization, CRUD and the
+  query entry points on a single class. Those are four separable concerns.
+- **`aggregate_sync()`.** Every other execution method has a sync counterpart;
+  aggregation is async-only.
+- **Schema validation against existing tables.** `CREATE TABLE IF NOT EXISTS`
+  silently no-ops when a table already exists with a different shape, so a
+  model/table mismatch surfaces as a mapping bug rather than a clear error.
 
 ## License
 
