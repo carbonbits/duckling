@@ -1,6 +1,22 @@
 # CHANGELOG
 
 
+## v0.2.0 (2026-09-10)
+
+### Chores
+
+- Import using the package name
+  ([`5e1fe94`](https://github.com/carbonbits/duckling/commit/5e1fe947566e9e1450532cfcd3041b1bb287944e))
+
+- Remove unneeded annotations
+  ([`d1b0da5`](https://github.com/carbonbits/duckling/commit/d1b0da5ca401f45c311694034dfd0769d20fe17e))
+
+### Features
+
+- Allow documents to specify the schema in use
+  ([`f05af76`](https://github.com/carbonbits/duckling/commit/f05af76b510efc890f00b6ed98bb2c703a3184a1))
+
+
 ## v0.1.1 (2026-09-09)
 
 ### Refactoring
