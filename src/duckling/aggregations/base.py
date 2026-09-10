@@ -1,7 +1,5 @@
 """The AggFunc base class."""
 
-from __future__ import annotations
-
 from typing import Callable, Optional
 
 

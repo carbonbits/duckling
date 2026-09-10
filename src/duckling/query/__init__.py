@@ -17,9 +17,9 @@ Aggregation functions now live in `duckling.aggregations` and are re-exported
 here so that `from duckling.query import Avg, Count, ...` keeps working.
 """
 
-from ..aggregations import AggFunc, Avg, Count, CountDistinct, Max, Min, Sum
-from .find_query import FindQuery
-from .iterator import FindQueryIterator
+from duckling.aggregations import AggFunc, Avg, Count, CountDistinct, Max, Min, Sum
+from duckling.query.find_query import FindQuery
+from duckling.query.iterator import FindQueryIterator
 
 __all__ = [
     "FindQuery",

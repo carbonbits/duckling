@@ -19,7 +19,7 @@ Duckling — A Beanie-inspired ORM for DuckDB.
     users = await User.find(User.age > 25).sort("+name").limit(10).to_list()
 """
 
-from .aggregations import (
+from duckling.aggregations import (
     AggFunc,
     Avg,
     Count,
@@ -28,9 +28,9 @@ from .aggregations import (
     Min,
     Sum,
 )
-from .connection import ConnectionFactory, DucklingSession, get_session
-from .document import Document
-from .exceptions import (
+from duckling.connection import ConnectionFactory, DucklingSession, get_session
+from duckling.document import Document
+from duckling.exceptions import (
     CollectionNotFound,
     ConnectionError,
     DocumentAlreadyExists,
@@ -40,16 +40,16 @@ from .exceptions import (
     NotInitializedError,
     ValidationError,
 )
-from .expressions import Expression
-from .fields import (
+from duckling.expressions import Expression
+from duckling.fields import (
     FieldProxy,
     Indexed,
     IndexSpec,
     SortDirection,
 )
-from .ids import generate_ulid
-from .init import init_duckling, init_duckling_sync
-from .operators import (
+from duckling.ids import generate_ulid
+from duckling.init import init_duckling, init_duckling_sync
+from duckling.operators import (
     And,
     Between,
     Eq,
@@ -68,7 +68,7 @@ from .operators import (
     Or,
     Raw,
 )
-from .query import FindQuery
+from duckling.query import FindQuery
 
 __all__ = [
     # Core

@@ -1,10 +1,8 @@
 """COUNT aggregation."""
 
-from __future__ import annotations
-
 from typing import Callable, Optional
 
-from .base import AggFunc
+from duckling.aggregations.base import AggFunc
 
 
 class Count(AggFunc):

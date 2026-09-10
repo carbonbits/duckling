@@ -1,10 +1,8 @@
 """Comparison expressions: `=`, `!=`, `>`, `>=`, `<`, `<=`."""
 
-from __future__ import annotations
-
 from typing import Any
 
-from .base import Expression
+from duckling.expressions.base import Expression
 
 
 class ComparisonExpression(Expression):

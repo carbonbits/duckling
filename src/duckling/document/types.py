@@ -1,7 +1,5 @@
 """Conversion between Python/Pydantic types and DuckDB columns and values."""
 
-from __future__ import annotations
-
 import datetime
 import enum
 import json

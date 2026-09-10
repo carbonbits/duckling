@@ -1,7 +1,5 @@
 """DuckDB connection management for Duckling."""
 
-from __future__ import annotations
-
 import asyncio
 import threading
 from contextlib import asynccontextmanager, contextmanager
@@ -10,7 +8,7 @@ from typing import Any, Callable, Optional
 
 import duckdb
 
-from .exceptions import ConnectionError, NotInitializedError
+from duckling.exceptions import ConnectionError, NotInitializedError
 
 # Returns the connection to use for the calling thread.
 ConnectionFactory = Callable[[], duckdb.DuckDBPyConnection]
@@ -24,7 +22,7 @@ class DucklingSession:
     Document models registered with Duckling.
     """
 
-    _instance: Optional[DucklingSession] = None
+    _instance: Optional["DucklingSession"] = None
     _lock = threading.Lock()
 
     def __init__(self) -> None:
@@ -35,7 +33,7 @@ class DucklingSession:
         self._initialized = False
 
     @classmethod
-    def get_instance(cls) -> DucklingSession:
+    def get_instance(cls) -> "DucklingSession":
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
@@ -216,6 +214,6 @@ class DucklingSession:
         self._initialized = False
 
 
-def get_session() -> DucklingSession:
+def get_session() -> "DucklingSession":
     """Get the current Duckling session."""
     return DucklingSession.get_instance()

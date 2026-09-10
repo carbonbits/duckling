@@ -1,7 +1,5 @@
 """Index specification and the `Indexed()` annotation helper."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Annotated, Any
 

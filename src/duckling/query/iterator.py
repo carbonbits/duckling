@@ -1,7 +1,5 @@
 """Async iterator over FindQuery results."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
@@ -11,7 +9,7 @@ if TYPE_CHECKING:
 class FindQueryIterator:
     """Async iterator for FindQuery results."""
 
-    def __init__(self, query: FindQuery) -> None:
+    def __init__(self, query: "FindQuery") -> None:
         self._query = query
         self._results: Optional[list] = None
         self._index = 0

@@ -1,16 +1,14 @@
 """FieldProxy — enables `User.name == "Alice"` style query expressions."""
 
-from __future__ import annotations
-
 from typing import Any
 
-from ..expressions import (
+from duckling.expressions import (
     BetweenExpression,
     ComparisonExpression,
     InExpression,
     LikeExpression,
 )
-from .sort import SortDirection
+from duckling.fields.sort import SortDirection
 
 
 class FieldProxy:

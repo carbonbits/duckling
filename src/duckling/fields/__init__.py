@@ -5,7 +5,7 @@ Expression classes now live in `duckling.expressions` and are re-exported here
 so that `from duckling.fields import Expression, ...` keeps working.
 """
 
-from ..expressions import (
+from duckling.expressions import (
     AndExpression,
     BetweenExpression,
     ComparisonExpression,
@@ -16,9 +16,9 @@ from ..expressions import (
     OrExpression,
     RawExpression,
 )
-from .index_spec import Indexed, IndexSpec
-from .proxy import FieldProxy
-from .sort import SortDirection
+from duckling.fields.index_spec import Indexed, IndexSpec
+from duckling.fields.proxy import FieldProxy
+from duckling.fields.sort import SortDirection
 
 __all__ = [
     "FieldProxy",

@@ -18,11 +18,9 @@ Usage:
     ).to_list()
 """
 
-from __future__ import annotations
-
 from typing import Any
 
-from .expressions import (
+from duckling.expressions import (
     AndExpression,
     BetweenExpression,
     ComparisonExpression,
@@ -33,7 +31,7 @@ from .expressions import (
     OrExpression,
     RawExpression,
 )
-from .fields import FieldProxy
+from duckling.fields import FieldProxy
 
 # ──────────────────────────────────────────────
 # Functional operator constructors

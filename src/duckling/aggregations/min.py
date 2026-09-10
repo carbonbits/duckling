@@ -1,8 +1,6 @@
 """MIN aggregation."""
 
-from __future__ import annotations
-
-from .base import AggFunc
+from duckling.aggregations.base import AggFunc
 
 
 class Min(AggFunc):

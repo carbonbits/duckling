@@ -1,8 +1,6 @@
 """`NOT` expressions."""
 
-from __future__ import annotations
-
-from .base import Expression
+from duckling.expressions.base import Expression
 
 
 class NotExpression(Expression):

@@ -1,10 +1,8 @@
 """Raw SQL expressions — the escape hatch."""
 
-from __future__ import annotations
-
 from typing import Optional
 
-from .base import Expression
+from duckling.expressions.base import Expression
 
 
 class RawExpression(Expression):
