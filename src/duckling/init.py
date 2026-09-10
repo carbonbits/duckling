@@ -20,15 +20,13 @@ Usage:
     )
 """
 
-from __future__ import annotations
-
 import asyncio
 from typing import Any, Optional, Sequence, Type
 
 import duckdb
 
-from .connection import ConnectionFactory, DucklingSession, get_session
-from .document import Document
+from duckling.connection import ConnectionFactory, DucklingSession, get_session
+from duckling.document import Document
 
 
 async def init_duckling(

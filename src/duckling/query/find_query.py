@@ -1,14 +1,12 @@
 """FindQuery — the fluent, chainable query builder."""
 
-from __future__ import annotations
-
 from typing import Any, Generic, Optional, Type, TypeVar
 
-from ..aggregations import AggFunc
-from ..connection import get_session
-from ..expressions import Expression
-from ..fields import SortDirection
-from .iterator import FindQueryIterator
+from duckling.aggregations import AggFunc
+from duckling.connection import get_session
+from duckling.expressions import Expression
+from duckling.fields import SortDirection
+from duckling.query.iterator import FindQueryIterator
 
 T = TypeVar("T")
 
@@ -36,12 +34,12 @@ class FindQuery(Generic[T]):
 
     # ── Chainable methods ─────────────────────
 
-    def find(self, *conditions: Expression) -> FindQuery[T]:
+    def find(self, *conditions: Expression) -> "FindQuery[T]":
         """Add additional filter conditions (AND)."""
         self._conditions.extend(conditions)
         return self
 
-    def sort(self, *keys: str | tuple[str, SortDirection] | tuple[str, int]) -> FindQuery[T]:
+    def sort(self, *keys: str | tuple[str, SortDirection] | tuple[str, int]) -> "FindQuery[T]":
         """
         Add sort clauses. Accepts:
             - "+field" / "-field" strings
@@ -64,17 +62,17 @@ class FindQuery(Generic[T]):
                 self._sort_clauses.append((self._column(field_name), direction))
         return self
 
-    def limit(self, n: int) -> FindQuery[T]:
+    def limit(self, n: int) -> "FindQuery[T]":
         """Limit the number of results."""
         self._limit_val = n
         return self
 
-    def skip(self, n: int) -> FindQuery[T]:
+    def skip(self, n: int) -> "FindQuery[T]":
         """Skip the first n results."""
         self._skip_val = n
         return self
 
-    def project(self, *fields: str, **named_fields: int) -> FindQuery[T]:
+    def project(self, *fields: str, **named_fields: int) -> "FindQuery[T]":
         """
         Select specific fields (projection).
 

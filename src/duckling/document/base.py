@@ -27,8 +27,6 @@ Usage:
     count = await User.find_all().count()
 """
 
-from __future__ import annotations
-
 import asyncio
 import re
 import typing
@@ -46,17 +44,17 @@ from typing import (
 import duckdb
 from pydantic import BaseModel, ConfigDict
 
-from ..connection import get_session
-from ..exceptions import DocumentAlreadyExists, DocumentNotFound, InvalidQueryError
-from ..expressions import Expression
-from ..fields import IndexSpec
-from ..query import FindQuery
-from .meta import DocumentMeta
-from .types import (
+from duckling.connection import get_session
+from duckling.document.meta import DocumentMeta
+from duckling.document.types import (
     duckdb_value_to_python,
     python_type_to_duckdb,
     python_value_to_duckdb,
 )
+from duckling.exceptions import DocumentAlreadyExists, DocumentNotFound, InvalidQueryError
+from duckling.expressions import Expression
+from duckling.fields import IndexSpec
+from duckling.query import FindQuery
 
 T = TypeVar("T", bound="Document")
 

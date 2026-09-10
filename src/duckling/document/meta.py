@@ -1,11 +1,9 @@
 """DocumentMeta — the metaclass behind class-level field access."""
 
-from __future__ import annotations
-
 from pydantic import BaseModel
 
-from ..exceptions import InvalidQueryError
-from ..fields import FieldProxy
+from duckling.exceptions import InvalidQueryError
+from duckling.fields import FieldProxy
 
 
 class DocumentMeta(type(BaseModel)):
