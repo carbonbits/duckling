@@ -92,9 +92,12 @@ async def init_duckling(
     if document_models:
         for model in document_models:
             if recreate_tables:
-                table = model._get_table_name()
-                await session.async_execute(f'DROP TABLE IF EXISTS "{table}"')
-                await session.async_execute(f"DROP SEQUENCE IF EXISTS seq_{table}_id")
+                table = model._get_qualified_table_name()
+                sequence = model._get_qualified_sequence_name()
+                # Table first: the sequence backing its primary key cannot be
+                # dropped while the table's DEFAULT still depends on it.
+                await session.async_execute(f"DROP TABLE IF EXISTS {table}")
+                await session.async_execute(f"DROP SEQUENCE IF EXISTS {sequence}")
             await model._create_table()
 
     return session
@@ -148,9 +151,12 @@ def init_duckling_sync(
     if document_models:
         for model in document_models:
             if recreate_tables:
-                table = model._get_table_name()
-                session.execute(f'DROP TABLE IF EXISTS "{table}"')
-                session.execute(f"DROP SEQUENCE IF EXISTS seq_{table}_id")
+                table = model._get_qualified_table_name()
+                sequence = model._get_qualified_sequence_name()
+                # Table first: the sequence backing its primary key cannot be
+                # dropped while the table's DEFAULT still depends on it.
+                session.execute(f"DROP TABLE IF EXISTS {table}")
+                session.execute(f"DROP SEQUENCE IF EXISTS {sequence}")
             model._create_table_sync()
 
     return session

@@ -30,8 +30,41 @@ class DocumentMeta(type(BaseModel)):
             proxy = FieldProxy(field_info.alias or field_name, field_info.annotation)
             cls._field_proxies[field_name] = proxy
 
+        mcs._check_table_name(cls)
         mcs._check_column_names(cls)
         return cls
+
+    @staticmethod
+    def _check_table_name(cls) -> None:
+        """
+        Reject a `Settings.table_name` or `schema_name` that tries to carry a
+        qualification of its own.
+
+        Both are rendered as single quoted identifiers, so `"v1.roles"` would
+        create a table literally named `v1.roles`, and the older
+        `'v1"."roles'` trick — which relied on the name being interpolated
+        between unescaped quotes — no longer resolves at all. Either is a
+        mistake worth naming at import time rather than at first query.
+        """
+        settings = getattr(cls, "Settings", None)
+        if settings is None:
+            return
+
+        for attr in ("table_name", "schema_name"):
+            value = getattr(settings, attr, None)
+            if not isinstance(value, str):
+                continue
+            bad = [ch for ch in ('"', ".") if ch in value]
+            if bad:
+                chars = " and ".join(repr(ch) for ch in bad)
+                raise InvalidQueryError(
+                    f"{cls.__name__}: Settings.{attr} = {value!r} contains {chars}. "
+                    f"Table and schema names are quoted as single identifiers. "
+                    f"To place this table in a schema, set them separately:\n"
+                    f"    class Settings:\n"
+                    f'        schema_name = "v1"\n'
+                    f'        table_name = "roles"'
+                )
 
     @staticmethod
     def _check_column_names(cls) -> None:

@@ -85,6 +85,36 @@ class Machine(Document):
     hostname: Annotated[str, IndexSpec(unique=True)] = Field(alias="host_name")
 
 
+class Role(Document):
+    """Schema-qualified table with an auto-increment primary key."""
+
+    name: Annotated[str, IndexSpec(unique=True)]
+    display_name: Optional[str] = None
+
+    class Settings:
+        schema_name = "v1"
+        table_name = "roles"
+
+
+class Permission(Document):
+    """A second model in the same non-default schema."""
+
+    code: str
+
+    class Settings:
+        schema_name = "v1"
+
+
+class ArchivedRole(Document):
+    """Same table name as `Role`, in a different schema."""
+
+    name: Annotated[str, IndexSpec(unique=True)]
+
+    class Settings:
+        schema_name = "v2"
+        table_name = "roles"
+
+
 ALL_MODELS = [
     User,
     Product,
@@ -96,4 +126,7 @@ ALL_MODELS = [
     LooseTag,
     Ticket,
     Machine,
+    Role,
+    Permission,
+    ArchivedRole,
 ]

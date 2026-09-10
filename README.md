@@ -162,6 +162,56 @@ accept either the field name or the column name.
 Two fields that map to the same column raise `InvalidQueryError` when the model
 class is defined.
 
+### Schemas
+
+Set `Settings.schema_name` to place a model's table in a named schema. Duckling
+issues `CREATE SCHEMA IF NOT EXISTS` before creating the table, so the schema
+does not have to exist beforehand:
+
+```python
+class Role(Document):
+    name: Annotated[str, IndexSpec(unique=True)]
+    display_name: Optional[str] = None
+
+    class Settings:
+        schema_name = "v1"
+        table_name = "roles"     # optional, as always
+```
+
+Everything Duckling generates is qualified — reads, writes, the primary-key
+sequence and the index:
+
+```sql
+CREATE SCHEMA IF NOT EXISTS "v1"
+CREATE SEQUENCE IF NOT EXISTS "v1"."seq_roles_id" START 1
+CREATE TABLE IF NOT EXISTS "v1"."roles" (
+  "id" INTEGER PRIMARY KEY DEFAULT(nextval('"v1"."seq_roles_id"')),
+  "name" VARCHAR UNIQUE,
+  "display_name" VARCHAR
+)
+SELECT "id", "name", "display_name" FROM "v1"."roles" WHERE "name" = ?
+```
+
+Because the sequence and index live in the table's own schema, two schemas can
+hold same-named tables independently:
+
+```python
+class ArchivedRole(Document):
+    name: str
+
+    class Settings:
+        schema_name = "v2"
+        table_name = "roles"     # "v2"."roles", unrelated to "v1"."roles"
+```
+
+Omit `schema_name` and the table goes in the connection's default schema
+(`main`), exactly as before.
+
+`schema_name` and `table_name` are each rendered as a *single* quoted
+identifier, so neither may contain `.` or `"` — a pre-qualified value like
+`table_name = "v1.roles"` raises `InvalidQueryError` when the class is defined,
+rather than silently creating a table named `v1.roles`.
+
 ### Indexed Fields
 
 ```python
@@ -372,6 +422,7 @@ src/duckling/
 ├── connection.py         # DuckDB session management
 ├── init.py               # init_duckling() / init_duckling_sync()
 ├── operators.py          # And, Or, In, Between, Like, … (functions)
+├── identifiers.py        # SQL identifier quoting / schema qualification
 ├── ids.py                # generate_ulid()
 ├── exceptions.py         # Custom exceptions
 ├── document/

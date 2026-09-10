@@ -6,6 +6,7 @@ from duckling.aggregations import AggFunc
 from duckling.connection import get_session
 from duckling.expressions import Expression
 from duckling.fields import SortDirection
+from duckling.identifiers import quote_ident
 from duckling.query.iterator import FindQueryIterator
 
 T = TypeVar("T")
@@ -88,8 +89,14 @@ class FindQuery(Generic[T]):
 
     # ── SQL Generation ────────────────────────
 
-    def _get_table_name(self) -> str:
-        return self._document_class._get_table_name()
+    def _qualified_table(self) -> str:
+        """
+        The quoted, possibly schema-qualified table reference.
+
+        Deliberately not named `_get_table_name`: on `Document` that returns
+        the *bare* table name, and the two must not be confused.
+        """
+        return self._document_class._get_qualified_table_name()
 
     def _column(self, field_name: str) -> str:
         """Resolve a caller-supplied field name to its column name."""
@@ -109,15 +116,15 @@ class FindQuery(Generic[T]):
         return " AND ".join(parts), params
 
     def _build_select_sql(self) -> tuple[str, list]:
-        table = self._get_table_name()
+        table = self._qualified_table()
 
         # Columns — always explicit, since _from_row maps rows positionally
         if self._projection:
-            cols = ", ".join(f'"{c}"' for c in self._projection)
+            cols = ", ".join(quote_ident(c) for c in self._projection)
         else:
             cols = self._document_class._select_columns_sql()
 
-        sql = f'SELECT {cols} FROM "{table}"'
+        sql = f"SELECT {cols} FROM {table}"
         params: list = []
 
         # WHERE
@@ -131,7 +138,7 @@ class FindQuery(Generic[T]):
             order_parts = []
             for field_name, direction in self._sort_clauses:
                 dir_str = "ASC" if direction == SortDirection.ASCENDING else "DESC"
-                order_parts.append(f'"{field_name}" {dir_str}')
+                order_parts.append(f"{quote_ident(field_name)} {dir_str}")
             sql += " ORDER BY " + ", ".join(order_parts)
 
         # LIMIT / OFFSET
@@ -143,8 +150,8 @@ class FindQuery(Generic[T]):
         return sql, params
 
     def _build_count_sql(self) -> tuple[str, list]:
-        table = self._get_table_name()
-        sql = f'SELECT COUNT(*) FROM "{table}"'
+        table = self._qualified_table()
+        sql = f"SELECT COUNT(*) FROM {table}"
         params: list = []
 
         where_sql, where_params = self._build_where()
@@ -155,8 +162,8 @@ class FindQuery(Generic[T]):
         return sql, params
 
     def _build_delete_sql(self) -> tuple[str, list]:
-        table = self._get_table_name()
-        sql = f'DELETE FROM "{table}"'
+        table = self._qualified_table()
+        sql = f"DELETE FROM {table}"
         params: list = []
 
         where_sql, where_params = self._build_where()
@@ -167,15 +174,15 @@ class FindQuery(Generic[T]):
         return sql, params
 
     def _build_update_sql(self, updates: dict[str, Any]) -> tuple[str, list]:
-        table = self._get_table_name()
+        table = self._qualified_table()
         set_parts = []
         params: list = []
 
         for col, val in updates.items():
-            set_parts.append(f'"{self._column(col)}" = ?')
+            set_parts.append(f"{quote_ident(self._column(col))} = ?")
             params.append(val)
 
-        sql = f'UPDATE "{table}" SET {", ".join(set_parts)}'
+        sql = f'UPDATE {table} SET {", ".join(set_parts)}'
 
         where_sql, where_params = self._build_where()
         if where_sql:
@@ -185,12 +192,12 @@ class FindQuery(Generic[T]):
         return sql, params
 
     def _build_aggregate_sql(self, agg_funcs: dict[str, AggFunc]) -> tuple[str, list]:
-        table = self._get_table_name()
+        table = self._qualified_table()
         agg_parts = []
         for alias, func in agg_funcs.items():
-            agg_parts.append(f'{func.to_sql(self._column)} AS "{alias}"')
+            agg_parts.append(f"{func.to_sql(self._column)} AS {quote_ident(alias)}")
 
-        sql = f'SELECT {", ".join(agg_parts)} FROM "{table}"'
+        sql = f'SELECT {", ".join(agg_parts)} FROM {table}'
         params: list = []
 
         where_sql, where_params = self._build_where()

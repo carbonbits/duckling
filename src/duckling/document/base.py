@@ -54,6 +54,7 @@ from duckling.document.types import (
 from duckling.exceptions import DocumentAlreadyExists, DocumentNotFound, InvalidQueryError
 from duckling.expressions import Expression
 from duckling.fields import IndexSpec
+from duckling.identifiers import qualified_name, quote_ident
 from duckling.query import FindQuery
 
 T = TypeVar("T", bound="Document")
@@ -88,17 +89,43 @@ class Document(BaseModel, metaclass=DocumentMeta):
 
     class Settings:
         table_name: Optional[str] = None
+        schema_name: Optional[str] = None
         indexes: list = []
 
     # ── Table name resolution ─────────────────
 
     @classmethod
     def _get_table_name(cls) -> str:
+        """
+        The bare (unqualified) table name. Never includes a schema — see
+        `_get_schema_name` for that, and `_get_qualified_table_name` for the
+        quoted reference to use in SQL.
+        """
         if hasattr(cls, "Settings") and hasattr(cls.Settings, "table_name") and cls.Settings.table_name:
             return cls.Settings.table_name
         # Auto-generate from class name: UserProfile → user_profile
         name = cls.__name__
         return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+
+    @classmethod
+    def _get_schema_name(cls) -> Optional[str]:
+        """
+        The schema holding this model's table, or None for the connection's
+        default schema (`main`, unless the caller changed the search path).
+
+            class Role(Document):
+                class Settings:
+                    schema_name = "v1"
+                    table_name = "roles"
+        """
+        if hasattr(cls, "Settings"):
+            return getattr(cls.Settings, "schema_name", None) or None
+        return None
+
+    @classmethod
+    def _get_qualified_table_name(cls) -> str:
+        """The quoted table reference for SQL: `"roles"` or `"v1"."roles"`."""
+        return qualified_name(cls._get_schema_name(), cls._get_table_name())
 
     # ── Field ↔ column name mapping ───────────
 
@@ -139,7 +166,7 @@ class Document(BaseModel, metaclass=DocumentMeta):
         `_from_row`, so the projection order must be the model's field order
         rather than whatever order the table happens to have on disk.
         """
-        return ", ".join(f'"{c}"' for c in cls._get_column_names())
+        return ", ".join(quote_ident(c) for c in cls._get_column_names())
 
     @classmethod
     def _get_column_types(cls) -> dict[str, str]:
@@ -195,60 +222,85 @@ class Document(BaseModel, metaclass=DocumentMeta):
     # ── Table creation ────────────────────────
 
     @classmethod
+    def _build_create_schema_sql(cls) -> Optional[str]:
+        """Generate CREATE SCHEMA for the model's schema, or None if it uses the default."""
+        schema = cls._get_schema_name()
+        if not schema:
+            return None
+        return f"CREATE SCHEMA IF NOT EXISTS {quote_ident(schema)}"
+
+    @classmethod
     def _build_create_table_sql(cls) -> str:
         """Generate CREATE TABLE IF NOT EXISTS SQL."""
-        table = cls._get_table_name()
+        table = cls._get_qualified_table_name()
         col_types = cls._get_column_types()
         indexed = dict(cls._get_indexed_fields())
         pk = cls._get_pk_column()
 
         if cls._is_auto_increment_id():
-            seq = cls._get_sequence_name()
-            id_def = f'"{pk}" INTEGER PRIMARY KEY DEFAULT(nextval(\'{seq}\'))'
+            # nextval() takes the sequence as a string literal, so the qualified
+            # name goes inside single quotes with its own double quotes intact.
+            seq = cls._get_qualified_sequence_name()
+            id_def = f"{quote_ident(pk)} INTEGER PRIMARY KEY DEFAULT(nextval('{seq}'))"
         else:
-            id_def = f'"{pk}" {col_types[pk]} PRIMARY KEY'
+            id_def = f"{quote_ident(pk)} {col_types[pk]} PRIMARY KEY"
 
         columns = []
         for col_name, col_type in col_types.items():
             if col_name == pk:
                 continue
-            parts = [f'"{col_name}"', col_type]
+            parts = [quote_ident(col_name), col_type]
             if col_name in indexed and indexed[col_name].unique:
                 parts.append("UNIQUE")
             columns.append(" ".join(parts))
 
         col_defs = [id_def] + columns
 
-        return f'CREATE TABLE IF NOT EXISTS "{table}" (\n  ' + ",\n  ".join(col_defs) + "\n)"
+        return f"CREATE TABLE IF NOT EXISTS {table} (\n  " + ",\n  ".join(col_defs) + "\n)"
 
     @classmethod
     def _get_sequence_name(cls) -> str:
-        """Name of the sequence backing an auto-increment primary key."""
+        """Bare name of the sequence backing an auto-increment primary key."""
         return f"seq_{cls._get_table_name()}_{cls._get_pk_column()}"
+
+    @classmethod
+    def _get_qualified_sequence_name(cls) -> str:
+        """
+        The quoted sequence reference for SQL.
+
+        The sequence lives in the same schema as its table, so two schemas can
+        each hold a `roles` table without their sequences colliding.
+        """
+        return qualified_name(cls._get_schema_name(), cls._get_sequence_name())
 
     @classmethod
     def _build_sequence_sql(cls) -> Optional[str]:
         if not cls._is_auto_increment_id():
             return None
-        return f"CREATE SEQUENCE IF NOT EXISTS {cls._get_sequence_name()} START 1"
+        return f"CREATE SEQUENCE IF NOT EXISTS {cls._get_qualified_sequence_name()} START 1"
 
     @classmethod
     def _create_table_sync(cls) -> None:
         """Create the table synchronously."""
         session = get_session()
+        schema_sql = cls._build_create_schema_sql()
+        if schema_sql:
+            session.execute(schema_sql)
         seq_sql = cls._build_sequence_sql()
         if seq_sql:
             session.execute(seq_sql)
         session.execute(cls._build_create_table_sql())
 
-        # Create indexes
-        table = cls._get_table_name()
+        # Create indexes. The index name is deliberately unqualified — DuckDB
+        # places the index in the schema of the table it targets.
+        table = cls._get_qualified_table_name()
         for field_name, spec in cls._get_indexed_fields():
-            idx_name = f"idx_{table}_{field_name}"
+            idx_name = f"idx_{cls._get_table_name()}_{field_name}"
             unique = "UNIQUE " if spec.unique else ""
             try:
                 session.execute(
-                    f'CREATE {unique}INDEX IF NOT EXISTS "{idx_name}" ON "{table}" ("{field_name}")'
+                    f"CREATE {unique}INDEX IF NOT EXISTS {quote_ident(idx_name)} "
+                    f"ON {table} ({quote_ident(field_name)})"
                 )
             except Exception:
                 pass  # Index may already exist
@@ -292,7 +344,7 @@ class Document(BaseModel, metaclass=DocumentMeta):
 
     def _build_insert_sql(self) -> tuple[str, list, dict[str, Any]]:
         """Build the INSERT for this document, returning (sql, values, data)."""
-        table = self._get_table_name()
+        table = self._get_qualified_table_name()
         pk = self._get_pk_column()
         data = self._to_row_dict()
 
@@ -309,10 +361,10 @@ class Document(BaseModel, metaclass=DocumentMeta):
 
         columns = list(data.keys())
         placeholders = ", ".join("?" for _ in columns)
-        col_str = ", ".join(f'"{c}"' for c in columns)
+        col_str = ", ".join(quote_ident(c) for c in columns)
         values = [data[c] for c in columns]
 
-        sql = f'INSERT INTO "{table}" ({col_str}) VALUES ({placeholders}) RETURNING "{pk}"'
+        sql = f"INSERT INTO {table} ({col_str}) VALUES ({placeholders}) RETURNING {quote_ident(pk)}"
         return sql, values, data
 
     def _already_exists_error(self, data: dict[str, Any]) -> DocumentAlreadyExists:
@@ -383,7 +435,7 @@ class Document(BaseModel, metaclass=DocumentMeta):
 
     def _build_update_sql(self) -> tuple[Optional[str], list]:
         """Build the UPDATE for this document, or (None, []) if it has no columns."""
-        table = self._get_table_name()
+        table = self._get_qualified_table_name()
         pk = self._get_pk_column()
         data = self._to_row_dict()
         data.pop(pk, None)
@@ -391,9 +443,9 @@ class Document(BaseModel, metaclass=DocumentMeta):
         if not data:
             return None, []
 
-        set_parts = [f'"{col}" = ?' for col in data]
+        set_parts = [f"{quote_ident(col)} = ?" for col in data]
         values = list(data.values()) + [self.id]
-        return f'UPDATE "{table}" SET {", ".join(set_parts)} WHERE "{pk}" = ?', values
+        return f'UPDATE {table} SET {", ".join(set_parts)} WHERE {quote_ident(pk)} = ?', values
 
     def save_sync(self: T) -> T:
         """Save (upsert) this document synchronously."""
@@ -415,9 +467,9 @@ class Document(BaseModel, metaclass=DocumentMeta):
             raise InvalidQueryError("Cannot delete a document without an id")
 
         session = get_session()
-        table = self._get_table_name()
+        table = self._get_qualified_table_name()
         pk = self._get_pk_column()
-        await session.async_execute(f'DELETE FROM "{table}" WHERE "{pk}" = ?', [self.id])
+        await session.async_execute(f"DELETE FROM {table} WHERE {quote_ident(pk)} = ?", [self.id])
 
     def delete_sync(self) -> None:
         """Delete this document synchronously."""
@@ -425,9 +477,9 @@ class Document(BaseModel, metaclass=DocumentMeta):
             raise InvalidQueryError("Cannot delete a document without an id")
 
         session = get_session()
-        table = self._get_table_name()
+        table = self._get_qualified_table_name()
         pk = self._get_pk_column()
-        session.execute(f'DELETE FROM "{table}" WHERE "{pk}" = ?', [self.id])
+        session.execute(f"DELETE FROM {table} WHERE {quote_ident(pk)} = ?", [self.id])
 
     # ── CRUD: Delete All ──────────────────────
 
@@ -435,15 +487,15 @@ class Document(BaseModel, metaclass=DocumentMeta):
     async def delete_all(cls) -> None:
         """Delete all documents in the table."""
         session = get_session()
-        table = cls._get_table_name()
-        await session.async_execute(f'DELETE FROM "{table}"')
+        table = cls._get_qualified_table_name()
+        await session.async_execute(f"DELETE FROM {table}")
 
     @classmethod
     def delete_all_sync(cls) -> None:
         """Delete all documents synchronously."""
         session = get_session()
-        table = cls._get_table_name()
-        session.execute(f'DELETE FROM "{table}"')
+        table = cls._get_qualified_table_name()
+        session.execute(f"DELETE FROM {table}")
 
     # ── Query: find / find_one / find_all ─────
 
@@ -479,10 +531,10 @@ class Document(BaseModel, metaclass=DocumentMeta):
     async def get(cls: Type[T], doc_id: Any) -> Optional[T]:
         """Get a document by its primary key id."""
         session = get_session()
-        table = cls._get_table_name()
+        table = cls._get_qualified_table_name()
         row = await session.async_fetchone(
-            f'SELECT {cls._select_columns_sql()} FROM "{table}" '
-            f'WHERE "{cls._get_pk_column()}" = ?',
+            f"SELECT {cls._select_columns_sql()} FROM {table} "
+            f"WHERE {quote_ident(cls._get_pk_column())} = ?",
             [doc_id],
         )
         if row is None:
@@ -493,10 +545,10 @@ class Document(BaseModel, metaclass=DocumentMeta):
     def get_sync(cls: Type[T], doc_id: Any) -> Optional[T]:
         """Get a document by id synchronously."""
         session = get_session()
-        table = cls._get_table_name()
+        table = cls._get_qualified_table_name()
         row = session.fetchone(
-            f'SELECT {cls._select_columns_sql()} FROM "{table}" '
-            f'WHERE "{cls._get_pk_column()}" = ?',
+            f"SELECT {cls._select_columns_sql()} FROM {table} "
+            f"WHERE {quote_ident(cls._get_pk_column())} = ?",
             [doc_id],
         )
         if row is None:
